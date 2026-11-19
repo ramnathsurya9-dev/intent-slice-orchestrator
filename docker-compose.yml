@@ -1,0 +1,70 @@
+# Needs a Linux kernel with the tbf and netem qdiscs (Ubuntu, or WSL2 with a netem-capable kernel).
+# Start:  docker compose up --build        Dashboard: http://localhost:8000
+
+networks:
+  telecom-core-net:
+    name: telecom-core-net
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-telecom   # fixed name: the HTB tree is attached here
+    ipam:
+      config:
+        - subnet: 192.168.50.0/24
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"   # the orchestrator runs on the host network and reaches it here
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  embb_slice:
+    build: ./simulated-services
+    container_name: embb_slice
+    networks:
+      telecom-core-net:
+        ipv4_address: 192.168.50.10
+
+  urllc_slice:
+    build: ./simulated-services
+    container_name: urllc_slice
+    networks:
+      telecom-core-net:
+        ipv4_address: 192.168.50.20
+
+  public_slice:
+    build: ./simulated-services
+    container_name: public_slice
+    networks:
+      telecom-core-net:
+        ipv4_address: 192.168.50.30
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: core-orchestrator/Dockerfile
+    container_name: orchestrator
+    privileged: true            # needed to run `tc` on the host's veth interfaces
+    network_mode: host          # sees the host-side veths; dashboard on http://<host-ip>:8000
+    environment:
+      REDIS_URL: redis://127.0.0.1:6379/0
+      TOTAL_SYSTEM_CAPACITY_MBPS: ${TOTAL_SYSTEM_CAPACITY_MBPS:-100}
+      POLICY_ON_EXCEED: ${POLICY_ON_EXCEED:-reject}
+      SHAPING_IFACE: br-telecom
+      PUBLIC_CAN_BORROW: ${PUBLIC_CAN_BORROW:-1}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # to look up each container's veth
+    restart: on-failure
+    depends_on:
+      redis:
+        condition: service_healthy
+      embb_slice:
+        condition: service_started
+      urllc_slice:
+        condition: service_started
+      public_slice:
+        condition: service_started

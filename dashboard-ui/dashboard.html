@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="{{ refresh }};url=/">
+<title>Slice Orchestrator</title>
+<style>
+  :root { --bg:#f4f6fa; --card:#fff; --fg:#17202e; --muted:#667085; --line:#e1e5ec;
+          --embb:#2457d6; --urllc:#8a3ffc; --pub:#1a9f5b; --bad:#d93a41; --warn:#c77700; --ok:#1a7f4b; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12151b; --card:#1c2029; --fg:#e8eaed; --muted:#98a2b3; --line:#2d333d;
+            --embb:#6d93ff; --urllc:#b78bff; --pub:#4cc38a; --bad:#ff7b80; --warn:#f0a35e; --ok:#4cc38a; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:18px 16px 40px; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui,sans-serif; }
+  main { max-width:960px; margin:0 auto; display:grid; gap:14px; }
+  h1 { font-size:20px; margin:0; } h2 { font-size:14px; margin:0 0 10px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+  header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; }
+  .chip { font-size:12px; padding:3px 10px; border-radius:99px; background:var(--line); }
+  .chip.sim { color:var(--warn); } .chip.live { color:var(--ok); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; }
+  .banner { padding:10px 14px; border-radius:10px; font-weight:600; }
+  .banner.alert { background:color-mix(in srgb,var(--bad) 16%,transparent); color:var(--bad); }
+  .banner.ok { background:color-mix(in srgb,var(--ok) 14%,transparent); color:var(--ok); }
+  .banner.err { background:color-mix(in srgb,var(--bad) 14%,transparent); color:var(--bad); }
+  .split { display:flex; height:34px; border-radius:8px; overflow:hidden; background:var(--line); }
+  .split div { display:flex; align-items:center; justify-content:center; color:#fff; font-size:12px; white-space:nowrap; overflow:hidden; }
+  .seg-embb { background:var(--embb); } .seg-urllc { background:var(--urllc); }
+  .seg-free { background:repeating-linear-gradient(45deg,rgba(128,128,128,.35) 0 6px,rgba(128,128,128,.12) 6px 12px); color:var(--fg)!important; }
+  .seg-pub { background:var(--pub); }
+  .legend { display:flex; gap:14px; flex-wrap:wrap; margin-top:8px; font-size:13px; color:var(--muted); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:14px; }
+  .big { font-size:30px; font-weight:700; } .big small { font-size:13px; font-weight:500; color:var(--muted); }
+  .gauge { height:10px; border-radius:6px; background:var(--line); overflow:hidden; margin:8px 0 10px; position:relative; }
+  .gauge > i { display:block; height:100%; background:var(--embb); }
+  .gauge > u { position:absolute; top:0; bottom:0; width:2px; background:var(--fg); opacity:.6; }  /* marks the guarantee */
+  .row { display:flex; justify-content:space-between; font-size:13px; padding:2px 0; color:var(--muted); }
+  .row b { color:var(--fg); font-weight:600; }
+  .tag { font-size:11px; padding:2px 8px; border-radius:99px; background:var(--line); margin-left:6px; }
+  .tag.thr { color:var(--bad); }
+  .buttons { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; }
+  .buttons form { margin:0; }
+  button { width:100%; padding:14px 10px; border:0; border-radius:10px; font:inherit; font-weight:600; color:#fff; cursor:pointer; background:var(--embb); }
+  button.danger { background:var(--bad); } button.alt { background:var(--urllc); } button.gray { background:#667085; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td { padding:5px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  td.k { white-space:nowrap; font-weight:600; width:1%; }
+  .k-rejected,.k-emergency { color:var(--bad); } .k-scaled,.k-congestion { color:var(--warn); } .k-recovered,.k-intent { color:var(--ok); }
+  .scroll { overflow-x:auto; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>📡 Intent-Based Slice Orchestrator</h1>
+    <span>
+      <span class="chip {{ 'sim' if snap.telemetry_source == 'simulated' else 'live' }}">telemetry: {{ snap.telemetry_source }}</span>
+      <span class="chip">auto-refresh {{ refresh }}s</span>
+    </span>
+  </header>
+
+  {% if flash %}<div class="banner {{ flash_kind }}">{{ flash }}</div>{% endif %}
+  {% if snap.congestion_reason %}
+  <div class="banner alert">⚠ Congestion response active: {{ snap.congestion_reason }}</div>
+  {% endif %}
+
+  <section class="card">
+    <h2>Capacity split · {{ snap.capacity_mbps }} Mbit/s total</h2>
+    <div class="split">
+      {% for s in snap.slices if s.commercial %}
+        {% set w = s.rate_mbps * 100 // snap.capacity_mbps %}
+        {% if w > 0 %}<div class="seg-{{ s.kind|lower }}" style="width:{{ w }}%">{{ s.rate_mbps }}</div>{% endif %}
+      {% endfor %}
+      {% if free_commercial_pct > 0 %}<div class="seg-free" style="width:{{ free_commercial_pct }}%">free</div>{% endif %}
+      <div class="seg-pub" style="width:{{ reserve_pct }}%">{{ snap.public_reserve_mbps }} protected</div>
+    </div>
+    <div class="legend">
+      <span>Commercial guarantees <b>{{ snap.commercial_allocated_mbps }}</b> / {{ snap.commercial_budget_mbps }} Mbit/s (hard cap 80%; idle capacity is lent out)</span>
+      <span>Public reserve {{ snap.public_reserve_mbps }} Mbit/s (20%)</span>
+    </div>
+  </section>
+
+  <section class="grid">
+    {% for s in snap.slices %}
+    {% set t = s.telemetry %}
+    <div class="card">
+      <h2>{{ s.name }} <span class="tag">{{ s.kind }}</span>{% if s.throttled %}<span class="tag thr">throttled</span>{% endif %}</h2>
+      <div class="big">{{ s.rate_mbps }} <small>Mbit/s guaranteed</small></div>
+      {% set used = (t.tx_mbps / s.ceiling_mbps * 100) if (t.tx_mbps is defined and s.ceiling_mbps) else 0 %}
+      <div class="gauge"><i style="width:{{ [used, 100]|min|round|int }}%"></i><u style="left:{{ (s.rate_mbps * 100 // s.ceiling_mbps) }}%"></u></div>
+      <div class="row"><span>Can use up to (when others idle)</span><b>{{ s.ceiling_mbps }} Mbit/s</b></div>
+      <div class="row"><span>Intent</span><b>{{ s.intent }}</b></div>
+      <div class="row"><span>Added latency</span><b>{{ s.latency_ms }} ms</b></div>
+      {% if t.error is defined %}
+        <div class="row"><span>Telemetry</span><b>{{ t.error }}</b></div>
+      {% elif t.tx_mbps is defined %}
+        <div class="row"><span>Measured throughput</span><b>{{ '%.1f'|format(t.tx_mbps) }} Mbit/s</b></div>
+        <div class="row"><span>Borrowing idle bandwidth</span><b>{{ '+%.1f Mbit/s'|format(t.borrowing_mbps) if t.borrowing_mbps > 0.05 else 'no' }}</b></div>
+        <div class="row"><span>Measured RTT</span><b>{{ '%.1f ms'|format(t.rtt_ms) if t.rtt_ms is not none else 'n/a' }}</b></div>
+        <div class="row"><span>Packet drops</span><b>{{ '%.1f'|format(t.drop_pct) }}%</b></div>
+      {% else %}
+        <div class="row"><span>Telemetry</span><b>waiting…</b></div>
+      {% endif %}
+      <div class="row"><span>IP / interface</span><b>{{ s.ip }} / {{ s.interface }}</b></div>
+    </div>
+    {% endfor %}
+  </section>
+
+  <section class="card">
+    <h2>Controls</h2>
+    <div class="buttons">
+      <form method="post" action="/ui/simulate"><button class="danger">Simulate 5G Crowd Congestion</button></form>
+      <form method="post" action="/ui/intent/cloud_gaming"><button class="alt">Intent: Cloud Gaming (URLLC)</button></form>
+      <form method="post" action="/ui/intent/4k_stream"><button>Intent: 4K Stream (eMBB)</button></form>
+      <form method="post" action="/ui/intent/idle"><button class="gray">Intent: Idle Power Save</button></form>
+      <form method="post" action="/ui/reset"><button class="gray">Reset All Slices</button></form>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Event log</h2>
+    <div class="scroll"><table>
+      {% for e in snap.events[:15] %}
+      <tr><td>{{ e.time }}</td><td class="k k-{{ e.kind }}">{{ e.kind }}</td><td>{{ e.message }}</td></tr>
+      {% else %}<tr><td>No events yet.</td></tr>{% endfor %}
+    </table></div>
+  </section>
+</main>
+</body>
+</html>
